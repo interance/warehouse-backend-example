@@ -1,15 +1,18 @@
 // (c) 2024, Interance GmbH & Co KG.
 
+#include "caf/net/tcp_accept_socket.hpp"
+#include "controller_actor.hpp"
 #include "database.hpp"
 #include "database_actor.hpp"
 #include "ec.hpp"
+#include "http_server.hpp"
 #include "types.hpp"
 
 #include <caf/actor_system.hpp>
 #include <caf/actor_system_config.hpp>
 #include <caf/caf_main.hpp>
-#include <caf/json_writer.hpp>
 #include <caf/json_object.hpp>
+#include <caf/json_writer.hpp>
 #include <caf/net/http/with.hpp>
 #include <caf/net/middleman.hpp>
 
@@ -48,166 +51,15 @@ struct config : caf::actor_system_config {
   config(){
     opt_group{custom_options_, "global"}
       .add<std::string>("db-file,d", "path to the database file")
-      .add<uint16_t>("port,p", "port to listen for incoming connections")
+      .add<uint16_t>("http-port,p", "port to listen for HTTP connections")
       .add<size_t>("max-connections,m", "limit for concurrent clients")
-      .add<size_t>("max-request-size,r", "limit for single request size");
+      .add<size_t>("max-request-size,r", "limit for single request size")
+      .add<uint16_t>("cmd-port,c", "port to listen for (JSON) commands")
+      .add<std::string>("cmd-addr,c", "bind address for the controller");
     opt_group{custom_options_, "tls"}
       .add<std::string>("key-file,k", "path to the private key file")
       .add<std::string>("cert-file,c", "path to the certificate file");
   }
-};
-
-bool is_ascii(caf::span<const std::byte> buffer) {
-  auto pred = [](auto x) { return isascii(static_cast<unsigned char>(x)); };
-  return std::all_of(buffer.begin(), buffer.end(), pred);
-}
-
-auto to_ascii(caf::span<const std::byte> buffer) {
-  return std::string_view{reinterpret_cast<const char*>(buffer.data()),
-                          buffer.size()};
-}
-
-class http_server : std::enable_shared_from_this<http_server> {
-public:
-  http_server(database_actor db_actor) : db_actor_(std::move(db_actor)) {
-    writer_.skip_object_type_annotation(true);
-  }
-
-  ~http_server() {
-    std::cerr << "http_server::~http_server\n";
-  }
-
-  void get(http::responder& res, int32_t key) {
-    auto* self = res.self();
-    auto prom = std::move(res).to_promise();
-  //  auto thisptr = shared_from_this();
-    self->request(db_actor_, 2s, caf::get_atom_v, key)
-      .then(
-        [this, prom](const item& value) mutable {
-          respond_with_item(prom, value);
-        },
-        [this, prom](const caf::error& what) mutable {
-          if (what == ec::no_such_item) {
-            respond_with_error(prom, "no_such_item");
-            return;
-          }
-          if (what == caf::sec::request_timeout) {
-            respond_with_error(prom, "timeout");
-            return;
-          }
-          respond_with_error(prom, "unexpected_database_result");
-        });
-  }
-
-  void add(http::responder& res, int32_t key, const std::string& name,
-           int32_t price) {
-    auto* self = res.self();
-    auto prom = std::move(res).to_promise();
-    //  auto thisptr = shared_from_this();
-    self->request(db_actor_, 2s, caf::get_atom_v, key)
-      .then(
-        [this, prom](const item& value) mutable {
-          respond_with_item(prom, value);
-        },
-        [this, prom](const caf::error& what) mutable {
-          respond_with_error(prom, what);
-        });
-  }
-
-  void add(http::responder& res, int32_t key) {
-    auto payload = res.payload();
-    if (!is_ascii(payload)) {
-      respond_with_error(res, "invalid_payload");
-      return;
-    }
-    auto maybe_jval = caf::json_value::parse(to_ascii(payload));
-    if (!maybe_jval || !maybe_jval->is_object()) {
-      respond_with_error(res, "invalid_payload");
-      return;
-    }
-    auto obj = maybe_jval->to_object();
-    auto price = obj.value("price");
-    auto name = obj.value("name");
-    if (!name.is_string() || !price.is_integer()) {
-      respond_with_error(res, "invalid_payload");
-      return;
-    }
-    auto* self = res.self();
-    auto prom = std::move(res).to_promise();
-    self
-      ->request(db_actor_, 2s, caf::put_atom_v, key,
-                static_cast<int32_t>(price.to_integer()),
-                std::string{name.to_string()})
-      .then([prom]() mutable { prom.respond(http::status::created); },
-            [this, prom](const caf::error& what) mutable {
-              respond_with_error(prom, what);
-            });
-  }
-
-  void inc(http::responder& res, int32_t key,int32_t amount) {
-    auto* self = res.self();
-    auto prom = std::move(res).to_promise();
-    self->request(db_actor_, 2s, inc_atom_v, key, amount)
-      .then([prom]() mutable { prom.respond(http::status::no_content); },
-            [this, prom](const caf::error& what) mutable {
-              respond_with_error(prom, what);
-            });
-  }
-
-  void dec(http::responder& res, int32_t key, int32_t amount) {
-    auto* self = res.self();
-    auto prom = std::move(res).to_promise();
-    self->request(db_actor_, 2s, dec_atom_v, key, amount)
-      .then([prom]() mutable { prom.respond(http::status::no_content); },
-            [this, prom](const caf::error& what) mutable {
-              respond_with_error(prom, what);
-            });
-  }
-
-  void del(http::responder& res, int32_t key) {
-    auto* self = res.self();
-    auto prom = std::move(res).to_promise();
-    self->request(db_actor_, 2s, caf::delete_atom_v, key)
-      .then([prom]() mutable { prom.respond(http::status::no_content); },
-            [this, prom](const caf::error& what) mutable {
-              respond_with_error(prom, what);
-            });
-  }
-
-private:
-  void respond_with_item(http::responder::promise& prom, const item& value) {
-    writer_.reset();
-    if (!writer_.apply(value)) {
-      respond_with_error(prom, "serialization_failed"sv);
-      return;
-    }
-    prom.respond(http::status::ok, json_mime_type, writer_.str());
-  }
-
-  template <class Responder>
-  void respond_with_error(Responder& prom, std::string_view code) {
-    std::string body = R"_({"code": ")_";
-    body += code;
-    body += "\"}";
-    prom.respond(http::status::internal_server_error, json_mime_type, body);
-  }
-
-  template <class Responder>
-  void respond_with_error(Responder& prom, const caf::error& reason) {
-    if (reason.category() == caf::type_id_v<ec>) {
-      auto code = to_string(static_cast<ec>(reason.code()));
-      respond_with_error(prom, code);
-      return;
-    }
-    if (reason == caf::sec::request_timeout) {
-      respond_with_error(prom, "timeout"sv);
-      return;
-    }
-    respond_with_error(prom, "internal_error"sv);
-  }
-
-  database_actor db_actor_;
-  caf::json_writer writer_;
 };
 
 } // namespace
@@ -226,6 +78,18 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
   }
   std::cout << "Database contains " << db->count() << " items" << std::endl;
   auto db_actor = spawn_database_actor(sys, db);
+  // Spin up the controller if configured.
+  auto ctrl = caf::actor{};
+  if (auto cmd_port = caf::get_as<uint16_t>(cfg, "cmd-port")) {
+    auto addr = caf::get_or(cfg, "cmd-addr", "0.0.0.0"sv);
+    auto fd = caf::net::make_tcp_accept_socket(*cmd_port, std::move(addr));
+    if (!fd) {
+      std::cerr << "Failed to open command port: " << to_string(fd.error())
+                << std::endl;
+      return EXIT_FAILURE;
+    }
+    ctrl = spawn_controller_actor(sys, db_actor, std::move(*fd));
+  }
   // Read the configuration for the web server.
   auto port = caf::get_or(cfg, "port", default_port);
   auto pem = caf::net::ssl::format::pem;
@@ -239,7 +103,7 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
     std::cerr << "*** inconsistent TLS config: declare neither file or both\n";
     return EXIT_FAILURE;
   }
-  // Open up a TCP port for incoming connections and start the server.
+  // Start the HTTP server.
   namespace ssl = caf::net::ssl;
   auto impl = std::make_shared<http_server>(db_actor);
   auto server
@@ -298,6 +162,7 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
   std::cerr << "*** shutting down\n";
   server->dispose();
   anon_send_exit(db_actor, caf::exit_reason::user_shutdown);
+  anon_send_exit(ctrl, caf::exit_reason::user_shutdown);
   return EXIT_SUCCESS;
 }
 

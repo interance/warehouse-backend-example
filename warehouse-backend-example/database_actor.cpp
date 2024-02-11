@@ -21,12 +21,12 @@ struct database_actor_state {
 
   database_actor::behavior_type make_behavior() {
     return {
-      [this](caf::get_atom, int32_t id) -> caf::result<item> {
+      [this](get_atom, int32_t id) -> caf::result<item> {
         if (auto value = db->get(id))
           return {std::move(*value)};
         return {caf::make_error(ec::no_such_item)};
       },
-      [this](caf::put_atom, int32_t id, int32_t price,
+      [this](add_atom, int32_t id, int32_t price,
              const std::string& name) -> caf::result<void> {
         if (auto err = db->insert(item{id, price, 0, name}); err != ec::nil)
           return {caf::make_error(err)};
@@ -42,7 +42,7 @@ struct database_actor_state {
           return {caf::make_error(err)};
         return caf::unit;
       },
-      [this](caf::delete_atom, int32_t id) -> caf::result<void> {
+      [this](del_atom, int32_t id) -> caf::result<void> {
         if (auto err = db->del(id); err != ec::nil)
           return {caf::make_error(err)};
         return caf::unit;

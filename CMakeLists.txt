@@ -55,9 +55,11 @@ get_caf()
 set(srcs warehouse-backend-example)
 
 add_executable(warehouse-backend-example
+  ${srcs}/controller_actor.cpp
   ${srcs}/database.cpp
   ${srcs}/database_actor.cpp
   ${srcs}/ec.cpp
+  ${srcs}/http_server.cpp
   ${srcs}/main.cpp
 )
 
