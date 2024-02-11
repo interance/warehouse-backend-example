@@ -1,6 +1,6 @@
 // (c) 2024, Interance GmbH & Co KG.
 
-#include "caf/net/tcp_accept_socket.hpp"
+#include "caf/event_based_actor.hpp"
 #include "controller_actor.hpp"
 #include "database.hpp"
 #include "database_actor.hpp"
@@ -15,6 +15,9 @@
 #include <caf/json_writer.hpp>
 #include <caf/net/http/with.hpp>
 #include <caf/net/middleman.hpp>
+#include <caf/net/tcp_accept_socket.hpp>
+#include <caf/net/web_socket/switch_protocol.hpp>
+#include <caf/scheduled_actor/flow.hpp>
 
 #include <sqlite3.h>
 
@@ -27,6 +30,9 @@
 using namespace std::literals;
 
 namespace http = caf::net::http;
+namespace ws = caf::net::web_socket;
+
+using ws_trait = ws::default_trait;
 
 namespace {
 
@@ -62,6 +68,40 @@ struct config : caf::actor_system_config {
   }
 };
 
+// The actor for handling a single WebSocket connection.
+void ws_worker(caf::event_based_actor* self, ws_trait::accept_event<> new_conn,
+               item_events events) {
+  using frame = ws::frame;
+  auto [pull, push] = new_conn.data();
+  auto writer = std::make_shared<caf::json_writer>();
+  writer->skip_object_type_annotation(true);
+  // We ignore whatever the client may send to us.
+  pull.observe_on(self).subscribe(std::ignore);
+  // Send all events as JSON objects to the client.
+  events.observe_on(self)
+    .filter([](const item_event& item) { return item != nullptr; })
+    .map([writer](const item_event& item) mutable {
+      writer->reset();
+      if (!writer->apply(*item)) {
+        return frame{};
+      }
+      return frame{writer->str()};
+    })
+    .filter([](const frame& item) { return !item.empty(); })
+    .subscribe(push);
+}
+
+// The actor for accepting incoming WebSocket connections.
+void ws_server(caf::event_based_actor* self, ws_trait::acceptor_resource<> res,
+               item_events events) {
+  self
+    ->make_observable() //
+    .from_resource(res)
+    .for_each([self, events](ws_trait::accept_event<> new_conn) {
+      self->spawn(ws_worker, new_conn, events);
+    });
+}
+
 } // namespace
 
 int caf_main(caf::actor_system& sys, const config& cfg) {
@@ -77,7 +117,7 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
     return EXIT_FAILURE;
   }
   std::cout << "Database contains " << db->count() << " items" << std::endl;
-  auto db_actor = spawn_database_actor(sys, db);
+  auto [db_actor, events] = spawn_database_actor(sys, db);
   // Spin up the controller if configured.
   auto ctrl = caf::actor{};
   if (auto cmd_port = caf::get_as<uint16_t>(cfg, "cmd-port")) {
@@ -147,6 +187,15 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
                [impl](http::responder& res, int32_t key) {
                  impl->del(res, key);
                })
+        // WebSocket route for subscribing to item events.
+        .route("/events", http::method::get,
+               ws::switch_protocol()
+                 .on_request(
+                   [](ws::acceptor<>& acc) { acc.accept(); })
+                 .on_start(
+                   [&sys, ev = events](ws_trait::acceptor_resource<> res) {
+                     sys.spawn(ws_server, res, ev);
+                   }))
         // Start the server.
         .start();
   // Report any error to the user.

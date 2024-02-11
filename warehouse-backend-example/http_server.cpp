@@ -73,7 +73,7 @@ void http_server::inc(responder& res, int32_t key, int32_t amount) {
   auto* self = res.self();
   auto prom = std::move(res).to_promise();
   self->request(db_actor_, 2s, inc_atom_v, key, amount)
-    .then([prom]() mutable { prom.respond(http_status::no_content); },
+    .then([prom](int32_t) mutable { prom.respond(http_status::no_content); },
           [this, prom](const caf::error& what) mutable {
             respond_with_error(prom, what);
           });
@@ -83,7 +83,7 @@ void http_server::dec(responder& res, int32_t key, int32_t amount) {
   auto* self = res.self();
   auto prom = std::move(res).to_promise();
   self->request(db_actor_, 2s, dec_atom_v, key, amount)
-    .then([prom]() mutable { prom.respond(http_status::no_content); },
+    .then([prom](int32_t) mutable { prom.respond(http_status::no_content); },
           [this, prom](const caf::error& what) mutable {
             respond_with_error(prom, what);
           });

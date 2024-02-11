@@ -18,4 +18,3 @@ bool inspect(Inspector& f, item& x) {
                             f.field("available", x.available),
                             f.field("name", x.name));
 }
-
