@@ -4,6 +4,7 @@
 
 #include <caf/actor.hpp>
 #include <caf/blocking_actor.hpp>
+#include <caf/blocking_mail.hpp>
 #include <caf/config.hpp>
 #include <caf/json_reader.hpp>
 #include <caf/net/socket.hpp>
@@ -150,9 +151,9 @@ void worker_impl(caf::blocking_actor* self, database_actor db_actor,
             }
             // Send the command to the database actor.
             if (cmd.type == "inc") {
-              self->send(db_actor, inc_atom_v, cmd.id, cmd.amount);
+              self->mail(inc_atom_v, cmd.id, cmd.amount).send(db_actor);
             } else {
-              self->send(db_actor, dec_atom_v, cmd.id, cmd.amount);
+              self->mail(dec_atom_v, cmd.id, cmd.amount).send(db_actor);
             }
           }
         });

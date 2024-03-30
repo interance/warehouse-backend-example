@@ -4,7 +4,6 @@
 #include "controller_actor.hpp"
 #include "database.hpp"
 #include "database_actor.hpp"
-#include "ec.hpp"
 #include "http_server.hpp"
 #include "types.hpp"
 
@@ -21,7 +20,6 @@
 
 #include <sqlite3.h>
 
-#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <iostream>

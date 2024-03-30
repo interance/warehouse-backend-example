@@ -11,32 +11,38 @@ using http_status = caf::net::http::status;
 void http_server::get(responder& res, int32_t key) {
   auto* self = res.self();
   auto prom = std::move(res).to_promise();
-  self->request(db_actor_, 2s, get_atom_v, key)
-    .then([this,
-           prom](const item& value) mutable { respond_with_item(prom, value); },
-          [this, prom](const caf::error& what) mutable {
-            if (what == ec::no_such_item) {
-              respond_with_error(prom, "no_such_item");
-              return;
-            }
-            if (what == caf::sec::request_timeout) {
-              respond_with_error(prom, "timeout");
-              return;
-            }
-            respond_with_error(prom, "unexpected_database_result");
-          });
+  self->mail(get_atom_v, key)
+    .request(db_actor_, 2s)
+    .then(
+      [this, prom](const item& value) mutable { //
+        respond_with_item(prom, value);
+      },
+      [this, prom](const caf::error& what) mutable {
+        if (what == ec::no_such_item) {
+          respond_with_error(prom, "no_such_item");
+          return;
+        }
+        if (what == caf::sec::request_timeout) {
+          respond_with_error(prom, "timeout");
+          return;
+        }
+        respond_with_error(prom, "unexpected_database_result");
+      });
 }
 
 void http_server::add(responder& res, int32_t key, const std::string& name,
                       int32_t price) {
   auto* self = res.self();
   auto prom = std::move(res).to_promise();
-  self->request(db_actor_, 2s, get_atom_v, key)
-    .then([this,
-           prom](const item& value) mutable { respond_with_item(prom, value); },
-          [this, prom](const caf::error& what) mutable {
-            respond_with_error(prom, what);
-          });
+  self->mail(get_atom_v, key)
+    .request(db_actor_, 2s)
+    .then(
+      [this, prom](const item& value) mutable { //
+        respond_with_item(prom, value);
+      },
+      [this, prom](const caf::error& what) mutable {
+        respond_with_error(prom, what);
+      });
 }
 
 void http_server::add(responder& res, int32_t key) {
@@ -60,9 +66,9 @@ void http_server::add(responder& res, int32_t key) {
   auto* self = res.self();
   auto prom = std::move(res).to_promise();
   self
-    ->request(db_actor_, 2s, add_atom_v, key,
-              static_cast<int32_t>(price.to_integer()),
-              std::string{name.to_string()})
+    ->mail(add_atom_v, key, static_cast<int32_t>(price.to_integer()),
+           std::string{name.to_string()})
+    .request(db_actor_, 2s)
     .then([prom]() mutable { prom.respond(http_status::created); },
           [this, prom](const caf::error& what) mutable {
             respond_with_error(prom, what);
@@ -72,7 +78,8 @@ void http_server::add(responder& res, int32_t key) {
 void http_server::inc(responder& res, int32_t key, int32_t amount) {
   auto* self = res.self();
   auto prom = std::move(res).to_promise();
-  self->request(db_actor_, 2s, inc_atom_v, key, amount)
+  self->mail(inc_atom_v, key, amount)
+    .request(db_actor_, 2s)
     .then([prom](int32_t) mutable { prom.respond(http_status::no_content); },
           [this, prom](const caf::error& what) mutable {
             respond_with_error(prom, what);
@@ -82,7 +89,8 @@ void http_server::inc(responder& res, int32_t key, int32_t amount) {
 void http_server::dec(responder& res, int32_t key, int32_t amount) {
   auto* self = res.self();
   auto prom = std::move(res).to_promise();
-  self->request(db_actor_, 2s, dec_atom_v, key, amount)
+  self->mail(dec_atom_v, key, amount)
+    .request(db_actor_, 2s)
     .then([prom](int32_t) mutable { prom.respond(http_status::no_content); },
           [this, prom](const caf::error& what) mutable {
             respond_with_error(prom, what);
@@ -92,7 +100,8 @@ void http_server::dec(responder& res, int32_t key, int32_t amount) {
 void http_server::del(responder& res, int32_t key) {
   auto* self = res.self();
   auto prom = std::move(res).to_promise();
-  self->request(db_actor_, 2s, del_atom_v, key)
+  self->mail(del_atom_v, key)
+    .request(db_actor_, 2s)
     .then([prom]() mutable { prom.respond(http_status::no_content); },
           [this, prom](const caf::error& what) mutable {
             respond_with_error(prom, what);
