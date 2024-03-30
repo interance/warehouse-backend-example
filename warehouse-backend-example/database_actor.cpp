@@ -10,6 +10,7 @@
 #include <caf/actor_system.hpp>
 #include <caf/async/publisher.hpp>
 #include <caf/error.hpp>
+#include <caf/flow/observable_builder.hpp>
 #include <caf/net/http/status.hpp>
 
 #include <future>
@@ -84,12 +85,11 @@ std::pair<database_actor, item_events>
 spawn_database_actor(caf::actor_system& sys, database_ptr db) {
   // Note: the actor uses a blocking API (SQLite3) and thus should run in its
   //       own thread.
-  using caf::detached;
   using caf::actor_from_state;
+  using caf::detached;
   auto events = std::make_shared<std::promise<item_events>>();
   auto events_future = events->get_future();
   auto hdl = sys.spawn<detached>(actor_from_state<database_actor_state>, db,
                                  events);
   return {hdl, events_future.get()};
 }
-
