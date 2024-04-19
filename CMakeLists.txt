@@ -18,7 +18,7 @@ option(BUILD_SHARED_LIBS "Build shared library targets" ON)
 
 set(SANITIZERS "" CACHE STRING "Selected sanitizers, e.g., 'address,undefined'")
 
-set(CAF_TAG "0.19.5" CACHE STRING "The tag of the CAF version to use")
+set(CAF_TAG "master" CACHE STRING "The tag of the CAF version to use")
 
 set(CXX_VERSION "17" CACHE STRING "The C++ version to use")
 

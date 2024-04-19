@@ -5,6 +5,8 @@
 #include <caf/default_enum_inspect.hpp>
 #include <caf/is_error_code_enum.hpp>
 
+#include <cstdint>
+
 /// Application-specific error codes.
 enum class ec : uint8_t {
   /// No error occurred.

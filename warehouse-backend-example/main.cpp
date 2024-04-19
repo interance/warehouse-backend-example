@@ -4,7 +4,6 @@
 #include "controller_actor.hpp"
 #include "database.hpp"
 #include "database_actor.hpp"
-#include "ec.hpp"
 #include "http_server.hpp"
 #include "types.hpp"
 
@@ -21,7 +20,7 @@
 
 #include <sqlite3.h>
 
-#include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -46,7 +45,6 @@ constexpr auto default_max_request_size = uint32_t{65'536};
 
 constexpr std::string_view json_mime_type = "application/json";
 
-
 std::atomic<bool> shutdown_flag;
 
 void set_shutdown_flag(int) {
@@ -54,7 +52,7 @@ void set_shutdown_flag(int) {
 }
 
 struct config : caf::actor_system_config {
-  config(){
+  config() {
     opt_group{custom_options_, "global"}
       .add<std::string>("db-file,d", "path to the database file")
       .add<uint16_t>("http-port,p", "port to listen for HTTP connections")
@@ -190,8 +188,7 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
         // WebSocket route for subscribing to item events.
         .route("/events", http::method::get,
                ws::switch_protocol()
-                 .on_request(
-                   [](ws::acceptor<>& acc) { acc.accept(); })
+                 .on_request([](ws::acceptor<>& acc) { acc.accept(); })
                  .on_start(
                    [&sys, ev = events](ws_trait::acceptor_resource<> res) {
                      sys.spawn(ws_server, res, ev);
