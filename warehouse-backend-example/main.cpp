@@ -5,6 +5,7 @@
 #include "database.hpp"
 #include "database_actor.hpp"
 #include "http_server.hpp"
+#include "log.hpp"
 #include "types.hpp"
 
 #include <caf/actor_system.hpp>
@@ -12,9 +13,12 @@
 #include <caf/caf_main.hpp>
 #include <caf/json_object.hpp>
 #include <caf/json_writer.hpp>
+#include <caf/net/acceptor_resource.hpp>
 #include <caf/net/http/with.hpp>
 #include <caf/net/middleman.hpp>
+#include <caf/net/octet_stream/with.hpp>
 #include <caf/net/tcp_accept_socket.hpp>
+#include <caf/net/web_socket/frame.hpp>
 #include <caf/net/web_socket/switch_protocol.hpp>
 #include <caf/scheduled_actor/flow.hpp>
 
@@ -22,7 +26,6 @@
 
 #include <csignal>
 #include <cstdlib>
-#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -30,8 +33,6 @@ using namespace std::literals;
 
 namespace http = caf::net::http;
 namespace ws = caf::net::web_socket;
-
-using ws_trait = ws::default_trait;
 
 namespace {
 
@@ -42,6 +43,8 @@ constexpr auto default_port = uint16_t{8080};
 constexpr auto default_max_connections = size_t{128};
 
 constexpr auto default_max_request_size = uint32_t{65'536};
+
+constexpr auto default_max_pending_frames = size_t{32};
 
 constexpr std::string_view json_mime_type = "application/json";
 
@@ -58,8 +61,8 @@ struct config : caf::actor_system_config {
       .add<uint16_t>("http-port,p", "port to listen for HTTP connections")
       .add<size_t>("max-connections,m", "limit for concurrent clients")
       .add<size_t>("max-request-size,r", "limit for single request size")
-      .add<uint16_t>("cmd-port,c", "port to listen for (JSON) commands")
-      .add<std::string>("cmd-addr,c", "bind address for the controller");
+      .add<uint16_t>("cmd-port,P", "port to listen for (JSON) commands")
+      .add<std::string>("cmd-addr,A", "bind address for the controller");
     opt_group{custom_options_, "tls"}
       .add<std::string>("key-file,k", "path to the private key file")
       .add<std::string>("cert-file,c", "path to the certificate file");
@@ -67,37 +70,40 @@ struct config : caf::actor_system_config {
 };
 
 // The actor for handling a single WebSocket connection.
-void ws_worker(caf::event_based_actor* self, ws_trait::accept_event<> new_conn,
-               item_events events) {
+void ws_worker(caf::event_based_actor* self,
+               caf::net::accept_event<ws::frame> new_conn, item_events events) {
   using frame = ws::frame;
   auto [pull, push] = new_conn.data();
   auto writer = std::make_shared<caf::json_writer>();
   writer->skip_object_type_annotation(true);
   // We ignore whatever the client may send to us.
-  pull.observe_on(self).subscribe(std::ignore);
+  pull.observe_on(self)
+    .do_finally([] { log::info("WebSocket client disconnected"); })
+    .subscribe(std::ignore);
   // Send all events as JSON objects to the client.
   events.observe_on(self)
     .filter([](const item_event& item) { return item != nullptr; })
     .map([writer](const item_event& item) mutable {
       writer->reset();
       if (!writer->apply(*item)) {
+        log::error("failed to serialize an item event: {}",
+                   writer->get_error());
         return frame{};
       }
       return frame{writer->str()};
     })
     .filter([](const frame& item) { return !item.empty(); })
+    .on_backpressure_buffer(default_max_pending_frames)
     .subscribe(push);
 }
 
 // The actor for accepting incoming WebSocket connections.
-void ws_server(caf::event_based_actor* self, ws_trait::acceptor_resource<> res,
-               item_events events) {
-  self
-    ->make_observable() //
-    .from_resource(res)
-    .for_each([self, events](ws_trait::accept_event<> new_conn) {
-      self->spawn(ws_worker, new_conn, events);
-    });
+void ws_server(caf::event_based_actor* self,
+               caf::net::acceptor_resource<ws::frame> res, item_events events) {
+  res.observe_on(self).for_each([self, events](auto new_conn) {
+    log::info("WebSocket client connected");
+    self->spawn(ws_worker, new_conn, events);
+  });
 }
 
 } // namespace
@@ -110,26 +116,34 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
   auto db_file = caf::get_or(cfg, "db-file", default_db_file);
   auto db = std::make_shared<database>(db_file);
   if (auto err = db->open()) {
-    std::cerr << "Failed to open the SQLite database: " << to_string(err)
-              << std::endl;
+    sys.println("Failed to open the SQLite database: {}", err);
     return EXIT_FAILURE;
   }
-  std::cout << "Database contains " << db->count() << " items" << std::endl;
+  sys.println("Database contains {} items", db->count());
   auto [db_actor, events] = spawn_database_actor(sys, db);
   // Spin up the controller if configured.
   auto ctrl = caf::actor{};
   if (auto cmd_port = caf::get_as<uint16_t>(cfg, "cmd-port")) {
     auto addr = caf::get_or(cfg, "cmd-addr", "0.0.0.0"sv);
-    auto fd = caf::net::make_tcp_accept_socket(*cmd_port, std::move(addr));
-    if (!fd) {
-      std::cerr << "Failed to open command port: " << to_string(fd.error())
-                << std::endl;
+    auto ctrl_server
+      = caf::net::octet_stream::with(sys)
+          // Bind to the user-defined port.
+          .accept(*cmd_port)
+          // Stop the server if our database actor terminates.
+          .monitor(db_actor)
+          // When started, run our worker actor to handle incoming connections.
+          .start([&sys, db_actor = db_actor](
+                   caf::net::acceptor_resource<std::byte> events) {
+            spawn_controller_actor(sys, db_actor, std::move(events));
+          });
+    if (!ctrl_server) {
+      sys.println("*** failed to start command server: {}",
+                  ctrl_server.error());
       return EXIT_FAILURE;
     }
-    ctrl = spawn_controller_actor(sys, db_actor, std::move(*fd));
   }
   // Read the configuration for the web server.
-  auto port = caf::get_or(cfg, "port", default_port);
+  auto port = caf::get_or(cfg, "http-port", default_port);
   auto pem = caf::net::ssl::format::pem;
   auto key_file = caf::get_as<std::string>(cfg, "tls.key-file");
   auto cert_file = caf::get_as<std::string>(cfg, "tls.cert-file");
@@ -138,7 +152,7 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
   auto max_request_size = caf::get_or(cfg, "max-request-size",
                                       default_max_request_size);
   if (!key_file != !cert_file) {
-    std::cerr << "*** inconsistent TLS config: declare neither file or both\n";
+    sys.println("*** inconsistent TLS config: declare neither file or both");
     return EXIT_FAILURE;
   }
   // Start the HTTP server.
@@ -162,50 +176,54 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
         // Route for retrieving an item from the database.
         .route("/item/<arg>", http::method::get,
                [impl](http::responder& res, int32_t key) {
+                 log::debug("GET /item/{}", key);
                  impl->get(res, key);
                })
         // Route for adding a new item to the database. The payload must be a
         // JSON object with the fields ""name" and "price".
         .route("/item/<arg>", http::method::post,
                [impl](http::responder& res, int32_t key) {
+                 log::debug("POST /item/{}, body: {}", key, res.body());
                  impl->add(res, key);
                })
         // Route for incrementing the available amount of an item.
         .route("/item/<arg>/inc/<arg>", http::method::put,
                [impl](http::responder& res, int32_t key, int32_t amount) {
+                 log::debug("PUT /item/{}/inc/{}", key, amount);
                  impl->inc(res, key, amount);
                })
         // Route for decrementing the available amount of an item.
         .route("/item/<arg>/dec/<arg>", http::method::put,
                [impl](http::responder& res, int32_t key, int32_t amount) {
+                 log::debug("PUT /item/{}/dec/{}", key, amount);
                  impl->dec(res, key, amount);
                })
         // Route for deleting an item from the database.
         .route("/item/<arg>", http::method::del,
                [impl](http::responder& res, int32_t key) {
+                 log::debug("DELETE /item/{}", key);
                  impl->del(res, key);
                })
         // WebSocket route for subscribing to item events.
         .route("/events", http::method::get,
                ws::switch_protocol()
                  .on_request([](ws::acceptor<>& acc) { acc.accept(); })
-                 .on_start(
-                   [&sys, ev = events](ws_trait::acceptor_resource<> res) {
-                     sys.spawn(ws_server, res, ev);
-                   }))
+                 .on_start([&sys, ev = events](auto res) {
+                   sys.spawn(ws_server, res, ev);
+                 }))
         // Start the server.
         .start();
   // Report any error to the user.
   if (!server) {
-    std::cerr << "*** unable to run at port " << port << ": "
-              << to_string(server.error()) << '\n';
+    sys.println("*** unable to run at port {}: {}", port, server.error());
     return EXIT_FAILURE;
   }
   // Wait for CTRL+C or SIGTERM and shut down the server.
-  std::cerr << "*** press CTRL+C to terminate the server\n";
+  sys.println("*** running at port {}, press CTRL+C to terminate the server",
+              port);
   while (!shutdown_flag)
     std::this_thread::sleep_for(250ms);
-  std::cerr << "*** shutting down\n";
+  sys.println("*** shutting down");
   server->dispose();
   anon_send_exit(db_actor, caf::exit_reason::user_shutdown);
   anon_send_exit(ctrl, caf::exit_reason::user_shutdown);
