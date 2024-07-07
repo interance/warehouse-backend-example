@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <caf/async/fwd.hpp>
+
 #include <cstdint>
 #include <string>
 
@@ -11,6 +13,10 @@ struct item {
   int32_t available;
   std::string name;
 };
+
+using item_event = std::shared_ptr<const item>;
+
+using item_events = caf::async::publisher<item_event>;
 
 template <class Inspector>
 bool inspect(Inspector& f, item& x) {

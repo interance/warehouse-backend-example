@@ -80,7 +80,7 @@ ec database::insert(const item& new_item) {
     return ec::database_inaccessible;
   if (sqlite3_bind_int(stmt, 1, new_item.id) != SQLITE_OK
       || sqlite3_bind_text(stmt, 2, new_item.name.c_str(), -1, SQLITE_STATIC)
-             != SQLITE_OK
+           != SQLITE_OK
       || sqlite3_bind_int(stmt, 3, new_item.price) != SQLITE_OK
       || sqlite3_bind_int(stmt, 4, new_item.available) != SQLITE_OK) {
     sqlite3_finalize(stmt);
