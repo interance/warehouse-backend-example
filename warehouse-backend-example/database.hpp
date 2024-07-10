@@ -40,16 +40,19 @@ public:
   [[nodiscard]] std::optional<item> get(int32_t id);
 
   /// Inserts a new item into the database.
-  /// @returns `true` on success, `false` if the item already exists.
+  /// @returns `ec::nil` on success, an error code otherwise.
   [[nodiscard]] ec insert(const item& new_item);
 
   /// Increments the available count of an item.
+  /// @returns `ec::nil` on success, an error code otherwise.
   [[nodiscard]] ec inc(int32_t id, int32_t amount);
 
   /// Decrements the available count of an item.
+  /// @returns `ec::nil` on success, an error code otherwise.
   [[nodiscard]] ec dec(int32_t id, int32_t amount);
 
   /// Deletes an item from the database.
+  /// @returns `ec::nil` on success, an error code otherwise.
   [[nodiscard]] ec del(int32_t id);
 
 private:

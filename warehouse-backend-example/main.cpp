@@ -97,15 +97,6 @@ void ws_worker(caf::event_based_actor* self,
     .subscribe(push);
 }
 
-// The actor for accepting incoming WebSocket connections.
-void ws_server(caf::event_based_actor* self,
-               caf::net::acceptor_resource<ws::frame> res, item_events events) {
-  res.observe_on(self).for_each([self, events](auto new_conn) {
-    log::info("WebSocket client connected");
-    self->spawn(ws_worker, new_conn, events);
-  });
-}
-
 } // namespace
 
 int caf_main(caf::actor_system& sys, const config& cfg) {
@@ -209,7 +200,14 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
                ws::switch_protocol()
                  .on_request([](ws::acceptor<>& acc) { acc.accept(); })
                  .on_start([&sys, ev = events](auto res) {
-                   sys.spawn(ws_server, res, ev);
+                   // Spawn a server for the WebSocket connection that simply
+                   // spawns new workers for each incoming connection.
+                   sys.spawn([res, ev](caf::event_based_actor* self) {
+                     res.observe_on(self).for_each([self, ev](auto new_conn) {
+                       log::info("WebSocket client connected");
+                       self->spawn(ws_worker, new_conn, ev);
+                     });
+                   });
                  }))
         // Start the server.
         .start();
