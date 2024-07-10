@@ -78,7 +78,7 @@ void ws_worker(caf::event_based_actor* self,
   writer->skip_object_type_annotation(true);
   // We ignore whatever the client may send to us.
   pull.observe_on(self)
-    .do_finally([] { log::info("WebSocket client disconnected"); })
+    .do_finally([] { applog::info("WebSocket client disconnected"); })
     .subscribe(std::ignore);
   // Send all events as JSON objects to the client.
   events.observe_on(self)
@@ -86,8 +86,8 @@ void ws_worker(caf::event_based_actor* self,
     .map([writer](const item_event& item) mutable {
       writer->reset();
       if (!writer->apply(*item)) {
-        log::error("failed to serialize an item event: {}",
-                   writer->get_error());
+        applog::error("failed to serialize an item event: {}",
+                      writer->get_error());
         return frame{};
       }
       return frame{writer->str()};
@@ -167,32 +167,32 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
         // Route for retrieving an item from the database.
         .route("/item/<arg>", http::method::get,
                [impl](http::responder& res, int32_t key) {
-                 log::debug("GET /item/{}", key);
+                 applog::debug("GET /item/{}", key);
                  impl->get(res, key);
                })
         // Route for adding a new item to the database. The payload must be a
         // JSON object with the fields ""name" and "price".
         .route("/item/<arg>", http::method::post,
                [impl](http::responder& res, int32_t key) {
-                 log::debug("POST /item/{}, body: {}", key, res.body());
+                 applog::debug("POST /item/{}, body: {}", key, res.body());
                  impl->add(res, key);
                })
         // Route for incrementing the available amount of an item.
         .route("/item/<arg>/inc/<arg>", http::method::put,
                [impl](http::responder& res, int32_t key, int32_t amount) {
-                 log::debug("PUT /item/{}/inc/{}", key, amount);
+                 applog::debug("PUT /item/{}/inc/{}", key, amount);
                  impl->inc(res, key, amount);
                })
         // Route for decrementing the available amount of an item.
         .route("/item/<arg>/dec/<arg>", http::method::put,
                [impl](http::responder& res, int32_t key, int32_t amount) {
-                 log::debug("PUT /item/{}/dec/{}", key, amount);
+                 applog::debug("PUT /item/{}/dec/{}", key, amount);
                  impl->dec(res, key, amount);
                })
         // Route for deleting an item from the database.
         .route("/item/<arg>", http::method::del,
                [impl](http::responder& res, int32_t key) {
-                 log::debug("DELETE /item/{}", key);
+                 applog::debug("DELETE /item/{}", key);
                  impl->del(res, key);
                })
         // WebSocket route for subscribing to item events.
@@ -204,7 +204,7 @@ int caf_main(caf::actor_system& sys, const config& cfg) {
                    // spawns new workers for each incoming connection.
                    sys.spawn([res, ev](caf::event_based_actor* self) {
                      res.observe_on(self).for_each([self, ev](auto new_conn) {
-                       log::info("WebSocket client connected");
+                       applog::info("WebSocket client connected");
                        self->spawn(ws_worker, new_conn, ev);
                      });
                    });
