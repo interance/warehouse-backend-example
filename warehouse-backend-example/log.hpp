@@ -10,7 +10,7 @@
 
 #include <string_view>
 
-namespace log {
+namespace applog {
 
 /// The name of this component in log events.
 constexpr std::string_view component = "app";
@@ -71,4 +71,4 @@ inline auto error() {
   return caf::logger::log(caf::log::level::error, component);
 }
 
-} // namespace log
+} // namespace applog

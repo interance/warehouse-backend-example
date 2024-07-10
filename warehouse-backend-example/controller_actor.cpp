@@ -47,23 +47,23 @@ spawn_controller_actor(caf::actor_system& sys, database_actor db_actor,
   return sys.spawn([events, db_actor](caf::event_based_actor* self) mutable {
     // Stop if the database actor terminates.
     self->monitor(db_actor, [self](const caf::error& reason) {
-      log::info("controller lost the database actor: {}", reason);
+      applog::info("controller lost the database actor: {}", reason);
       self->quit(reason);
     });
     // For each buffer pair, we create a new flow ...
     events.observe_on(self).for_each([self, db_actor](auto ev) {
-      log::info("controller added a new client");
+      applog::info("controller added a new client");
       auto [pull, push] = ev.data();
       pull
         .observe_on(self)
         // ... that converts the lines to commands ...
         .transform(caf::flow::byte::split_as_utf8_at('\n'))
         .map([self](const caf::cow_string& line) {
-          log::debug("controller received line: {}", line.str());
+          applog::debug("controller received line: {}", line.str());
           caf::json_reader reader;
           if (!reader.load(line.str())) {
-            log::error("controller failed to parse JSON: {}",
-                       reader.get_error());
+            applog::error("controller failed to parse JSON: {}",
+                          reader.get_error());
             return std::shared_ptr<command>{}; // Invalid JSON.
           }
           auto ptr = std::make_shared<command>();
@@ -94,15 +94,16 @@ spawn_controller_actor(caf::actor_system& sys, database_actor db_actor,
           // On error, we return an error message to the client.
           return result
             .map([ptr](int32_t res) {
-              log::debug("controller received result for {} -> {}", *ptr, res);
+              applog::debug("controller received result for {} -> {}", *ptr,
+                            res);
               auto str = R"_({"result":)_"s;
               str += std::to_string(res);
               str += '}';
               return caf::cow_string{std::move(str)};
             })
             .on_error_return([ptr](const caf::error& what) {
-              log::debug("controller received an error for {} -> {}", *ptr,
-                         what);
+              applog::debug("controller received an error for {} -> {}", *ptr,
+                            what);
               auto str = R"_({"error":")_"s;
               str += to_string(what);
               str += R"_("})_";
@@ -115,7 +116,8 @@ spawn_controller_actor(caf::actor_system& sys, database_actor db_actor,
         .on_backpressure_buffer(32)
         // ... and pushes the results back to the client as bytes.
         .transform(caf::flow::string::to_chars("\n"))
-        .do_finally([] { log::info("controller lost connection to a client"); })
+        .do_finally(
+          [] { applog::info("controller lost connection to a client"); })
         .map([](char ch) { return static_cast<std::byte>(ch); })
         .subscribe(push);
     });
