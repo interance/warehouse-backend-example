@@ -8,6 +8,7 @@
 
 #include <memory>
 
+// --(database-actor-begin)--
 struct database_trait {
   using signatures = caf::type_list<
     // Retrieves an item from the database.
@@ -23,6 +24,9 @@ struct database_trait {
 };
 
 using database_actor = caf::typed_actor<database_trait>;
+// --(database-actor-end)--
 
+// --(spawn-database-actor-begin)--
 std::pair<database_actor, item_events>
 spawn_database_actor(caf::actor_system& sys, database_ptr db);
+// --(spawn-database-actor-end)--

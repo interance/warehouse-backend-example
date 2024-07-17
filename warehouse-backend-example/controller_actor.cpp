@@ -2,7 +2,7 @@
 
 #include "controller_actor.hpp"
 
-#include "log.hpp"
+#include "applog.hpp"
 
 #include <caf/actor.hpp>
 #include <caf/blocking_actor.hpp>
@@ -22,9 +22,9 @@ using namespace std::literals;
 
 namespace {
 
+// --(command-begin)--
 struct command {
-  // Either "inc" or "dec".
-  std::string type;
+  std::string type; // Either "inc" or "dec".
   int32_t id = 0;
   int32_t amount = 0;
 
@@ -38,9 +38,11 @@ bool inspect(Insepctor& f, command& x) {
   return f.object(x).fields(f.field("type", x.type), f.field("id", x.id),
                             f.field("amount", x.amount));
 }
+// --(command-end)--
 
 } // namespace
 
+// --(spawn-controller-actor-impl-part1-begin)--
 caf::actor
 spawn_controller_actor(caf::actor_system& sys, database_actor db_actor,
                        caf::net::acceptor_resource<std::byte> events) {
@@ -58,6 +60,8 @@ spawn_controller_actor(caf::actor_system& sys, database_actor db_actor,
         .observe_on(self)
         // ... that converts the lines to commands ...
         .transform(caf::flow::byte::split_as_utf8_at('\n'))
+        // --(spawn-controller-actor-impl-part1-end)--
+        // --(spawn-controller-actor-impl-part2-begin)--
         .map([self](const caf::cow_string& line) {
           applog::debug("controller received line: {}", line.str());
           caf::json_reader reader;
@@ -71,6 +75,8 @@ spawn_controller_actor(caf::actor_system& sys, database_actor db_actor,
             return std::shared_ptr<command>{}; // Not a command.
           return ptr;
         })
+        // --(spawn-controller-actor-impl-part2-end)--
+        // --(spawn-controller-actor-impl-part3-begin)--
         .concat_map([self, db_actor](std::shared_ptr<command> ptr) {
           // If the `map` step failed, inject an error message.
           if (ptr == nullptr || !ptr->valid()) {
@@ -112,6 +118,8 @@ spawn_controller_actor(caf::actor_system& sys, database_actor db_actor,
             })
             .as_observable();
         })
+        // --(spawn-controller-actor-impl-part3-end)--
+        // --(spawn-controller-actor-impl-part4-begin)--
         // ... disconnects if the client is too slow ...
         .on_backpressure_buffer(32)
         // ... and pushes the results back to the client as bytes.
@@ -123,3 +131,4 @@ spawn_controller_actor(caf::actor_system& sys, database_actor db_actor,
     });
   });
 }
+// --(spawn-controller-actor-impl-part4-end)--

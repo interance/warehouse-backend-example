@@ -7,6 +7,7 @@
 
 #include <cstdint>
 
+// --(ec-begin)--
 /// Application-specific error codes.
 enum class ec : uint8_t {
   /// No error occurred.
@@ -23,6 +24,7 @@ enum class ec : uint8_t {
   /// @note This value is not a valid error code.
   num_ec_codes,
 };
+// --(ec-end)--
 
 /// @relates ec
 std::string to_string(ec);

@@ -14,7 +14,7 @@ endif()
 
 # -- options -------------------------------------------------------------------
 
-option(BUILD_SHARED_LIBS "Build shared library targets" ON)
+option(BUILD_SHARED_LIBS "Build shared library targets" OFF)
 
 set(SANITIZERS "" CACHE STRING "Selected sanitizers, e.g., 'address,undefined'")
 
@@ -63,6 +63,6 @@ add_executable(warehouse-backend-example
   ${srcs}/main.cpp
 )
 
-target_link_libraries(warehouse-backend-example PRIVATE CAF::core CAF::net SQLite::SQLite3)
+target_link_libraries(warehouse-backend-example PRIVATE CAF::net SQLite::SQLite3)
 
 target_compile_features(warehouse-backend-example PRIVATE cxx_std_${CXX_VERSION})
