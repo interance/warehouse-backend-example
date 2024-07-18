@@ -18,6 +18,7 @@ struct sqlite3;
 
 } // extern "C"
 
+// --(database-begin)--
 /// A simple database interface for storing items.
 class database {
 public:
@@ -62,3 +63,4 @@ private:
 
 /// A smart pointer to an item database.
 using database_ptr = std::shared_ptr<database>;
+// --(database-end)--

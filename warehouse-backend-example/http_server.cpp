@@ -8,6 +8,7 @@ using namespace std::literals;
 
 using http_status = caf::net::http::status;
 
+// --(http-server-get-begin)--
 void http_server::get(responder& res, int32_t key) {
   auto* self = res.self();
   auto prom = std::move(res).to_promise();
@@ -29,6 +30,7 @@ void http_server::get(responder& res, int32_t key) {
         respond_with_error(prom, "unexpected_database_result");
       });
 }
+// --(http-server-get-end)--
 
 void http_server::add(responder& res, int32_t key, const std::string& name,
                       int32_t price) {

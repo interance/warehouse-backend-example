@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <string_view>
 
+// --(http-server-utility-begin)--
 /// Bridges between HTTP requests and the database actor.
 class http_server {
 public:
@@ -34,6 +35,7 @@ public:
   void dec(responder& res, int32_t key, int32_t amount);
 
   void del(responder& res, int32_t key);
+// --(http-server-utility-end)--
 
 private:
   void respond_with_item(responder::promise& prom, const item& value);
